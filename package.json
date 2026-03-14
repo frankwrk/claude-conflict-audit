@@ -1,6 +1,6 @@
 {
   "name": "claude-conflict-audit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Conflict detection and auto-learning system for Claude Code plugins, skills, hooks, and MCP servers",
   "scripts": {

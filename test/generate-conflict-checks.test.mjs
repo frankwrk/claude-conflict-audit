@@ -2,23 +2,31 @@
  * Integration tests for generate-conflict-checks.mjs
  *
  * Runs the generator as a subprocess and verifies the output file.
- * Side effect: overwrites ~/.claude/skills/conflict-audit/references/conflict-checks.md
+ * Uses a temp dir for output — no ~/.claude/ side effects.
  */
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const GENERATOR = resolve(DIR, '../hooks/generate-conflict-checks.mjs');
-const OUTPUT = resolve(homedir(), '.claude', 'skills', 'conflict-audit', 'references', 'conflict-checks.md');
+
+// Temp dir for output — isolated from ~/.claude/skills/
+const TMP_DIR = mkdtempSync(resolve(tmpdir(), 'conflict-audit-gen-test-'));
+const OUTPUT = resolve(TMP_DIR, 'conflict-checks.md');
+const ENV = { ...process.env, CONFLICT_AUDIT_GENERATE_OUTPUT: OUTPUT };
+
+after(() => {
+  try { rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
+});
 
 // Run once and cache result — all tests read the same output file
-const result = spawnSync('node', [GENERATOR], { encoding: 'utf-8', timeout: 10000 });
+const result = spawnSync('node', [GENERATOR], { encoding: 'utf-8', timeout: 10000, env: ENV });
 const content = (() => {
   try { return readFileSync(OUTPUT, 'utf-8'); } catch { return ''; }
 })();
@@ -60,7 +68,7 @@ test('output file starts with correct title', () => {
 });
 
 test('running generator twice produces identical output (idempotent)', () => {
-  const r2 = spawnSync('node', [GENERATOR], { encoding: 'utf-8', timeout: 10000 });
+  const r2 = spawnSync('node', [GENERATOR], { encoding: 'utf-8', timeout: 10000, env: ENV });
   assert.strictEqual(r2.status, 0);
   const content2 = readFileSync(OUTPUT, 'utf-8');
   assert.strictEqual(content2, content, 'Generator is not idempotent — output changed on second run');
