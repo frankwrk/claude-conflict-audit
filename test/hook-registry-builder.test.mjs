@@ -7,12 +7,47 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
-const { buildHookRegistry, detectOrderingConflicts, formatRegistryDiagram } =
+const { buildHookRegistry, detectOrderingConflicts, formatRegistryDiagram, inferWritesStdout } =
   await import(resolve(DIR, '../hooks/hook-registry-builder.mjs'));
+
+// ─── inferWritesStdout ────────────────────────────────────────────────────
+
+const TMP = join(tmpdir(), `hook-registry-test-${process.pid}`);
+mkdirSync(TMP, { recursive: true });
+
+test('inferWritesStdout: .mjs with console.log → true', () => {
+  const f = join(TMP, 'stdout.mjs');
+  writeFileSync(f, 'console.log("hello");');
+  assert.strictEqual(inferWritesStdout(f), true);
+});
+
+test('inferWritesStdout: .mjs with no stdout calls → false', () => {
+  const f = join(TMP, 'silent.mjs');
+  writeFileSync(f, 'import { appendFileSync } from "node:fs";\nappendFileSync("/tmp/log", "data");');
+  assert.strictEqual(inferWritesStdout(f), false);
+});
+
+test('inferWritesStdout: .sh with echo → true', () => {
+  const f = join(TMP, 'noisy.sh');
+  writeFileSync(f, '#!/bin/bash\necho "done"');
+  assert.strictEqual(inferWritesStdout(f), true);
+});
+
+test('inferWritesStdout: .sh with no echo/printf → false', () => {
+  const f = join(TMP, 'silent.sh');
+  writeFileSync(f, '#!/bin/bash\ntouch /tmp/marker');
+  assert.strictEqual(inferWritesStdout(f), false);
+});
+
+test('inferWritesStdout: non-existent file → true (conservative)', () => {
+  assert.strictEqual(inferWritesStdout('/nonexistent/path/hook.mjs'), true);
+});
 
 // ─── detectOrderingConflicts (pure, no FS) ────────────────────────────────
 
