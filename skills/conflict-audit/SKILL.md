@@ -1,6 +1,6 @@
 ---
 name: conflict-audit
-version: 1.1.0
+version: 1.1.1
 description: Audits installed Claude Code plugins, skills, hooks, and MCP servers for conflicts, broken symlinks, and tool-blocking rules. Use when the user says "check for conflicts", "why is X failing", "audit my plugins", "something is blocked", "install a new plugin", "tool not working", or after installing any new plugin, skill, or MCP server.
 author: frank
 tags: [hooks, plugins, debugging, mcp, automation]
@@ -25,15 +25,23 @@ Scans the full Claude Code plugin/skill/hook/MCP setup for known conflicts and r
 
 ## Steps
 
-### --candidates mode (promotion UI)
+### Candidate promotion (interactive)
 
-When user invokes `/conflict-audit --candidates`:
+When user asks to review or promote conflict candidates:
 
 ```bash
 node ~/.claude/hooks/promote-candidates.mjs
 ```
 
-Run this via Bash and stream the output. The script is interactive — it will prompt for keystrokes and answers. Do NOT summarize or intercept mid-run; let it complete. After it exits, note how many were promoted/dismissed from the final output line.
+Run this via Bash. The script requires an interactive TTY — it will prompt per-candidate with `[p]romote / [d]ismiss / [s]kip`. Do NOT summarize or intercept mid-run; let it complete. After it exits, note how many were promoted/dismissed from the final output line.
+
+For non-interactive contexts (CI, automation), use the `--export` flag instead:
+
+```bash
+node ~/.claude/hooks/promote-candidates.mjs --export
+```
+
+This outputs a sanitized `conflicts.json` to stdout with no prompts.
 
 ---
 
@@ -176,7 +184,7 @@ try {
 ```
 
 Show high-confidence candidates (5+ occurrences) with a note:
-"To promote candidates interactively: run `/conflict-audit --candidates`"
+"To promote candidates interactively: run `node ~/.claude/hooks/promote-candidates.mjs` (TTY required). For non-interactive export: `node ~/.claude/hooks/promote-candidates.mjs --export`"
 
 ### Step 5: Offer fixes
 
