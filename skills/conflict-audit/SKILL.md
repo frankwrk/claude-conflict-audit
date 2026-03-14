@@ -1,12 +1,15 @@
 ---
 name: conflict-audit
+version: 1.1.0
 description: Audits installed Claude Code plugins, skills, hooks, and MCP servers for conflicts, broken symlinks, and tool-blocking rules. Use when the user says "check for conflicts", "why is X failing", "audit my plugins", "something is blocked", "install a new plugin", "tool not working", or after installing any new plugin, skill, or MCP server.
+author: frank
+tags: [hooks, plugins, debugging, mcp, automation]
+tools: [Read, Bash, Glob, Grep]
+requires_hook: PostToolUse
+install: bash install.sh
 allowed-tools: "Read Bash Glob Grep"
 metadata:
-  author: frank
-  version: 1.1.0
   category: utilities
-  tags: [plugins, conflicts, debugging, hooks, mcp]
 ---
 
 # Conflict Audit

@@ -2,47 +2,65 @@
  * Integration tests for conflict-detector.mjs
  *
  * Spawns the detector as a subprocess (matching real PostToolUse hook behavior).
- * Side effects: writes to ~/.claude/conflict-log.jsonl and ~/.claude/hooks/conflict-candidates.jsonl
+ * Uses a temp dir for candidate writes — no ~/.claude/ side effects.
  *
  * NOTE: Session dedup uses ppid — all subprocesses spawned from this test runner
  * share the same dedup dir. Each test uses a unique tool/response combination
  * to avoid cross-test dedup interference.
  */
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, unlinkSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const DETECTOR = resolve(DIR, '../hooks/conflict-detector.mjs');
-const CANDIDATES = resolve(homedir(), '.claude', 'hooks', 'conflict-candidates.jsonl');
+
+// Temp dir for all candidate writes — isolated from ~/.claude/hooks/
+const TMP_DIR = mkdtempSync(resolve(tmpdir(), 'conflict-audit-test-'));
+const CANDIDATES = resolve(TMP_DIR, 'conflict-candidates.jsonl');
+
+after(() => {
+  try { rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
+});
 
 function run(input) {
   return spawnSync('node', [DETECTOR], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
     encoding: 'utf-8',
     timeout: 10000,
+    env: { ...process.env, CONFLICT_AUDIT_CANDIDATES_PATH: CANDIDATES },
   });
 }
 
 function cleanCandidates() {
-  try { unlinkSync(CANDIDATES); } catch { /* file may not exist */ }
+  try { rmSync(CANDIDATES); } catch { /* file may not exist */ }
 }
 
 // ─── Basic behavior ───────────────────────────────────────────────────────
 
 test('empty input → exit 0, no stdout', () => {
-  const r = spawnSync('node', [DETECTOR], { input: '', encoding: 'utf-8', timeout: 10000 });
+  const r = spawnSync('node', [DETECTOR], {
+    input: '',
+    encoding: 'utf-8',
+    timeout: 10000,
+    env: { ...process.env, CONFLICT_AUDIT_CANDIDATES_PATH: CANDIDATES },
+  });
   assert.strictEqual(r.status, 0);
   assert.strictEqual(r.stdout.trim(), '');
 });
 
 test('whitespace-only input → exit 0, no stdout', () => {
-  const r = spawnSync('node', [DETECTOR], { input: '   \n  ', encoding: 'utf-8', timeout: 10000 });
+  const r = spawnSync('node', [DETECTOR], {
+    input: '   \n  ',
+    encoding: 'utf-8',
+    timeout: 10000,
+    env: { ...process.env, CONFLICT_AUDIT_CANDIDATES_PATH: CANDIDATES },
+  });
   assert.strictEqual(r.status, 0);
   assert.strictEqual(r.stdout.trim(), '');
 });
@@ -142,7 +160,12 @@ test('repeated MCP error → candidate entry captured', () => {
     tool_response: 'error: rate limit exceeded — retry after 60s',
   });
 
-  spawnSync('node', [DETECTOR], { input, encoding: 'utf-8', timeout: 10000 });
+  spawnSync('node', [DETECTOR], {
+    input,
+    encoding: 'utf-8',
+    timeout: 10000,
+    env: { ...process.env, CONFLICT_AUDIT_CANDIDATES_PATH: CANDIDATES },
+  });
 
   assert.ok(existsSync(CANDIDATES), 'candidates.jsonl should be created');
   const lines = readFileSync(CANDIDATES, 'utf-8').trim().split('\n').filter(Boolean);

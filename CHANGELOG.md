@@ -7,6 +7,35 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.0] - 2026-03-14
+
+### Added
+- `install.sh` — one-liner installer: copies hooks + skill, merges PostToolUse hook into `settings.json` via `node -e` (no `jq` dependency), backs up existing files with timestamps, idempotency check prevents duplicate hook registration, verifies hook runs before confirming success
+- `uninstall.sh` — clean removal of all hook files, skill directory, and `settings.json` hook entry
+- `hooks/promote-candidates.mjs` — interactive candidate promotion tool: reads `conflict-candidates.jsonl`, groups by pattern with `[HIGH ≥5]`/`[LOW <5]` confidence labels, interactive `[p]romote / [d]ismiss / [s]kip` per entry, writes to `learned-conflicts.mjs` with `node --check` syntax validation + rollback on failure; `--export` flag outputs sanitized `conflicts.json` for community sharing (strips `inputSummary`/`responseSummary`)
+- `hooks/pre-commit.sh` — auto-regenerates `conflict-checks.md` when knowledge base files change; install via `ln -s ~/.claude/hooks/pre-commit.sh .git/hooks/pre-commit`
+- `test/install.test.mjs` — 11 integration tests for `install.sh` using `spawnSync` with isolated `$HOME` (no `~/.claude/` side effects)
+- `test/promote-candidates.test.mjs` — 9 tests covering `--export`, non-TTY guard, missing/empty candidates, sensitive field stripping, and corrupt NDJSON resilience
+
+### Changed
+- `SKILL.md` frontmatter: added `version`, `tags`, `tools`, `requires_hook`, and `install` fields for skills.sh marketplace compatibility
+- `hooks/conflict-detector.mjs`: `CANDIDATES_PATH` now respects `CONFLICT_AUDIT_CANDIDATES_PATH` env var for test isolation
+- `hooks/generate-conflict-checks.mjs`: output path now respects `CONFLICT_AUDIT_GENERATE_OUTPUT` env var for test isolation
+- `test/conflict-detector.test.mjs`: uses temp dir + env var — no `~/.claude/` side effects
+- `test/generate-conflict-checks.test.mjs`: uses temp dir + env var — no `~/.claude/` side effects
+- `TODOS.md`: replaced completed P2/P3 items with new deferred work (uninstall restore from backup, pre-commit auto-wiring, community patterns infrastructure)
+- Test suite: 55 → 75 tests (0 failures)
+
+### Fixed
+- `hooks/promote-candidates.mjs`: aggregation loop now only counts `candidate` rows with a non-empty `responseSummary` (delta rows and entries without a summary were inflating confidence scores)
+- `hooks/pre-commit.sh`: resolves symlink via `realpath` before deriving script dir; uses `CONFLICT_AUDIT_GENERATE_OUTPUT` to write to the repo's reference file rather than `~/.claude/`; `git add` fails hard if staging fails
+- `install.sh`: shell variable interpolation into `node -e` string replaced with `process.env.SETTINGS` / `process.env.HOOK_CMD` (prevents breakage on paths containing single quotes); detects `curl|bash` missing-source-files scenario and exits with a helpful error
+- `uninstall.sh`: `conflict-candidates.jsonl` now removed from hooks dir; guards against `settings.hooks` being undefined before accessing `PostToolUse`; cleans up empty `hooks` key after removal; same env-var fix as `install.sh`
+- `test/install.test.mjs`: `runInstaller` now sets `CLAUDE_HOME` in isolated env to prevent externally-exported override from bypassing test isolation
+- `test/promote-candidates.test.mjs`: missing-candidates test corrected to use `run([])` — TTY guard fires before file check, so exit 1 is expected behavior
+
+---
+
 ## [1.0.0] - 2026-03-14
 
 ### Added

@@ -13,9 +13,9 @@ const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 const { CONFLICTS } = await import(resolve(HOOK_DIR, "conflict-knowledge.mjs"));
 const { LEARNED_CONFLICTS } = await import(resolve(HOOK_DIR, "learned-conflicts.mjs"));
 
-const OUTPUT = resolve(
-  homedir(), ".claude", "skills", "conflict-audit", "references", "conflict-checks.md"
-);
+// Override via CONFLICT_AUDIT_GENERATE_OUTPUT env var (used for test isolation).
+const OUTPUT = process.env.CONFLICT_AUDIT_GENERATE_OUTPUT
+  ?? resolve(homedir(), ".claude", "skills", "conflict-audit", "references", "conflict-checks.md");
 
 const SEV_ICON = { blocking: "🚫 BLOCKING", degraded: "⚠️ DEGRADED", warning: "💡 WARNING" };
 

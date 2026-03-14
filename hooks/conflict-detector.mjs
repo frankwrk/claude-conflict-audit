@@ -42,7 +42,9 @@ const LOG_PATH = resolve(homedir(), ".claude", "conflict-log.jsonl");
 
 // CANONICAL PATH for conflict candidates — also referenced in conflict-audit/SKILL.md bash snippets.
 // If this path changes, update both places.
-const CANDIDATES_PATH = resolve(homedir(), ".claude", "hooks", "conflict-candidates.jsonl");
+// Override via CONFLICT_AUDIT_CANDIDATES_PATH env var (used for test isolation).
+const CANDIDATES_PATH = process.env.CONFLICT_AUDIT_CANDIDATES_PATH
+  ?? resolve(homedir(), ".claude", "hooks", "conflict-candidates.jsonl");
 
 function logConflict(entry) {
   try {

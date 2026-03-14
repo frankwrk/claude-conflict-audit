@@ -1,235 +1,262 @@
 #!/usr/bin/env node
 /**
- * Candidate Promotion UI
+ * promote-candidates.mjs — Candidate Promotion Tool
  *
- * Reads ~/.claude/hooks/conflict-candidates.jsonl, shows each unrecognized
- * error candidate, and lets you promote → learned-conflicts.mjs or dismiss.
+ * Reads conflict-candidates.jsonl, groups by pattern, and interactively
+ * promotes high-confidence candidates into learned-conflicts.mjs.
  *
- * Usage: node promote-candidates.mjs
- *        (or via /conflict-audit --candidates)
+ * Usage:
+ *   node ~/.claude/hooks/promote-candidates.mjs           # interactive review
+ *   node ~/.claude/hooks/promote-candidates.mjs --export  # dump conflicts.json to stdout
+ *
+ * PROMOTION FLOW
+ * ──────────────────────────────────────────────────────────────
+ * conflict-candidates.jsonl  →  aggregate by id  →  sort by occurrences
+ *   │                                                     │
+ *   └─[missing/empty]─────────────────── "No candidates" exit 0
+ *                                                         │
+ *                              display with [HIGH ≥5] / [LOW <5] labels
+ *                                                         │
+ *                              interactive [p]romote / [d]ismiss / [s]kip
+ *                                                         │
+ *                              write learned-conflicts.mjs
+ *                                │
+ *                                ├─ node --check  →  [fail] rollback
+ *                                │
+ *                                └─ node generate-conflict-checks.mjs
+ *
+ * --export mode: skip prompts, output CONFLICTS+LEARNED to stdout (no sensitive fields)
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { readFileSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { execSync } from "node:child_process";
+import { createInterface } from "node:readline";
+import { spawnSync } from "node:child_process";
 
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
-const CANDIDATES_PATH = resolve(homedir(), ".claude", "hooks", "conflict-candidates.jsonl");
-const DISMISSED_PATH = resolve(homedir(), ".claude", "hooks", "conflict-dismissed.json");
-const LEARNED_PATH = resolve(HOOK_DIR, "learned-conflicts.mjs");
-const GENERATOR_PATH = resolve(HOOK_DIR, "generate-conflict-checks.mjs");
 
-const SEV_ICON = { blocking: "🚫", degraded: "⚠️", warning: "💡" };
+const CANDIDATES_PATH = process.env.CONFLICT_AUDIT_CANDIDATES_PATH
+  ?? resolve(homedir(), ".claude", "hooks", "conflict-candidates.jsonl");
 
-// ─── Load candidates ──────────────────────────────────────────────────────────
+const LEARNED_PATH = process.env.CONFLICT_AUDIT_LEARNED_PATH
+  ?? resolve(HOOK_DIR, "learned-conflicts.mjs");
 
-function loadCandidates() {
-  if (!existsSync(CANDIDATES_PATH)) return [];
-  const lines = readFileSync(CANDIDATES_PATH, "utf-8").trim().split("\n").filter(Boolean);
-  const counts = {};
-  const meta = {};
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line);
-      counts[entry.id] = (counts[entry.id] ?? 0) + 1;
-      if (entry.type === "candidate") meta[entry.id] = entry;
-    } catch { /* skip malformed lines */ }
-  }
-  return Object.keys(counts)
-    .filter((id) => meta[id]) // only ids with a full candidate row
-    .map((id) => ({ ...meta[id], occurrences: counts[id] }))
-    .sort((a, b) => b.occurrences - a.occurrences);
-}
+const GENERATOR = resolve(HOOK_DIR, "generate-conflict-checks.mjs");
 
-// ─── Dismissed list ───────────────────────────────────────────────────────────
+const ARGS = process.argv.slice(2);
+const EXPORT_MODE = ARGS.includes("--export");
 
-function loadDismissed() {
-  try { return JSON.parse(readFileSync(DISMISSED_PATH, "utf-8")); } catch { return []; }
-}
+// ─── Export mode ──────────────────────────────────────────────────────────
 
-function saveDismissed(list) {
-  writeFileSync(DISMISSED_PATH, JSON.stringify(list, null, 2) + "\n", "utf-8");
-}
+if (EXPORT_MODE) {
+  const { CONFLICTS } = await import(resolve(HOOK_DIR, "conflict-knowledge.mjs"));
+  const { LEARNED_CONFLICTS } = await import(LEARNED_PATH);
 
-// ─── Write entry to learned-conflicts.mjs ────────────────────────────────────
-
-function appendLearned(entry) {
-  const src = readFileSync(LEARNED_PATH, "utf-8");
-  const insertAt = src.lastIndexOf("];");
-  if (insertAt === -1) throw new Error("Could not find ]; in learned-conflicts.mjs");
-
-  const snippet = `
-  {
-    id: ${JSON.stringify(entry.id)},
-    source: ${JSON.stringify(entry.source)},
-    tool: ${JSON.stringify(entry.tool)},
-    severity: ${JSON.stringify(entry.severity)},
-    detect: [
-      // Auto-generated from candidate — edit to refine
-      { type: "tool-is", value: ${JSON.stringify(entry.tool)} },
-      { type: "response-contains", value: ${JSON.stringify(entry.responseSnippet)} },
-    ],
-    description: ${JSON.stringify(entry.description)},
-    fix: {
-      summary: ${JSON.stringify(entry.fixSummary)},
-      example: ${JSON.stringify(entry.fixExample)},
-    },
-  },
-`;
-
-  const updated = src.slice(0, insertAt) + snippet + src.slice(insertAt);
-  writeFileSync(LEARNED_PATH, updated, "utf-8");
-}
-
-// ─── Interactive prompt helpers ───────────────────────────────────────────────
-
-function ask(rl, question, defaultValue = "") {
-  return new Promise((resolve) => {
-    const prompt = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `;
-    rl.question(prompt, (answer) => {
-      resolve(answer.trim() || defaultValue);
-    });
+  // Strip sensitive runtime fields — safe for community sharing
+  const sanitize = (c) => ({
+    id: c.id,
+    source: c.source,
+    tool: c.tool,
+    severity: c.severity,
+    detect: c.detect,
+    falsePositiveGuards: c.falsePositiveGuards ?? [],
+    description: c.description,
+    fix: c.fix,
   });
+
+  const all = [...CONFLICTS, ...LEARNED_CONFLICTS].map(sanitize);
+  process.stdout.write(JSON.stringify(all, null, 2) + "\n");
+  process.exit(0);
 }
 
-function askKey(question) {
-  // Single-keypress without Enter — falls back to readline on non-TTY
-  process.stdout.write(`${question} `);
-  return new Promise((resolve) => {
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
-      process.stdin.setEncoding("utf-8");
-      process.stdin.once("data", (ch) => {
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        process.stdout.write("\n");
-        resolve(ch.toLowerCase().trim());
-      });
-    } else {
-      // Non-TTY (pipe) — readline
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      rl.question("", (ans) => { rl.close(); resolve(ans.toLowerCase().trim()); });
-    }
-  });
-}
+// ─── Interactive mode ─────────────────────────────────────────────────────
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
-async function main() {
-  const all = loadCandidates();
-  const dismissed = loadDismissed();
-  const dismissedSet = new Set(dismissed);
-  const candidates = all.filter((c) => !dismissedSet.has(c.id));
-
-  if (candidates.length === 0) {
-    if (all.length > 0) {
-      console.log(`No candidates to review (${all.length} already dismissed).`);
-    } else {
-      console.log("No candidates yet. The conflict detector will populate them over time.");
-    }
-    return;
-  }
-
-  console.log(`\n${"─".repeat(56)}`);
-  console.log(`  Conflict Candidates — ${candidates.length} to review`);
-  console.log(`${"─".repeat(56)}\n`);
-
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-
-  let promotedCount = 0;
-  let dismissedCount = 0;
-
-  for (let i = 0; i < candidates.length; i++) {
-    const c = candidates[i];
-    const inputPreview = (c.inputSummary ?? "").slice(0, 120);
-    const responsePreview = (c.responseSummary ?? "").slice(0, 200);
-
-    console.log(`── Candidate ${i + 1}/${candidates.length}: ${c.id} ${"─".repeat(Math.max(0, 40 - c.id.length))}`);
-    console.log(`   Tool:        ${c.tool}`);
-    console.log(`   Occurrences: ${c.occurrences}`);
-    console.log(`   First seen:  ${c.firstSeen ?? "unknown"}`);
-    console.log(`   Input:       ${inputPreview || "(empty)"}`);
-    console.log(`   Response:    ${responsePreview || "(empty)"}`);
-    console.log();
-
-    let key;
-    try {
-      key = await askKey("[p] promote  [d] dismiss  [s] skip  [q] quit >");
-    } catch {
-      break;
-    }
-
-    if (key === "q") {
-      console.log("Quit.");
-      break;
-    }
-
-    if (key === "d") {
-      dismissed.push(c.id);
-      dismissedSet.add(c.id);
-      saveDismissed(dismissed);
-      dismissedCount++;
-      console.log(`🗑  Dismissed ${c.id}\n`);
-      continue;
-    }
-
-    if (key === "p") {
-      console.log();
-      const severity = await ask(rl, "Severity [blocking/degraded/warning]", "degraded");
-      const source = await ask(rl, "Source (e.g. \"my-plugin\")");
-      const description = await ask(rl, "Description (what happened)");
-      const fixSummary = await ask(rl, "Fix summary");
-      const fixExample = await ask(rl, "Fix example (code/command)");
-
-      const responseSnippet = (c.responseSummary ?? "").slice(0, 60);
-
-      try {
-        appendLearned({
-          id: c.id,
-          source: source || c.tool,
-          tool: c.tool,
-          severity,
-          responseSnippet,
-          description,
-          fixSummary,
-          fixExample,
-        });
-        promotedCount++;
-        const icon = SEV_ICON[severity] ?? "⚠️";
-        console.log(`\n${icon} Promoted ${c.id}\n`);
-      } catch (err) {
-        console.error(`Error writing to learned-conflicts.mjs: ${err.message}`);
-      }
-      continue;
-    }
-
-    // 's' or enter — skip
-  }
-
-  rl.close();
-
-  if (promotedCount > 0) {
-    console.log(`\n🔄 Regenerating conflict-checks.md...`);
-    try {
-      execSync(`node ${JSON.stringify(GENERATOR_PATH)}`, { stdio: "inherit" });
-      console.log(`✅ Done — ${promotedCount} promoted, ${dismissedCount} dismissed.`);
-    } catch (err) {
-      console.error(`Generator failed: ${err.message}`);
-    }
-  } else {
-    const summary = [
-      dismissedCount > 0 ? `${dismissedCount} dismissed` : "",
-      "no promotions",
-    ].filter(Boolean).join(", ");
-    console.log(`\nDone (${summary}).`);
-  }
-}
-
-main().catch((err) => {
-  console.error("promote-candidates:", err.message);
+if (!process.stdin.isTTY) {
+  console.error("promote-candidates requires an interactive terminal.");
+  console.error("Run directly: node ~/.claude/hooks/promote-candidates.mjs");
   process.exit(1);
-});
+}
+
+// ─── Read and aggregate candidates ───────────────────────────────────────
+
+if (!existsSync(CANDIDATES_PATH)) {
+  console.log("No candidates yet. Run /conflict-audit to capture unknown failures.");
+  process.exit(0);
+}
+
+const raw = readFileSync(CANDIDATES_PATH, "utf-8").trim();
+if (!raw) {
+  console.log("No candidates yet.");
+  process.exit(0);
+}
+
+const counts = {};   // id → occurrence count
+const meta = {};     // id → first candidate entry
+
+for (const line of raw.split("\n")) {
+  if (!line.trim()) continue;
+  let entry;
+  try { entry = JSON.parse(line); } catch { continue; /* skip corrupt lines */ }
+  if (entry.type !== "candidate" || !entry.responseSummary?.trim()) continue;
+  counts[entry.id] = (counts[entry.id] ?? 0) + 1;
+  if (!meta[entry.id]) meta[entry.id] = entry;
+}
+
+const ids = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+
+if (ids.length === 0) {
+  console.log("No candidates yet.");
+  process.exit(0);
+}
+
+// ─── Load already-promoted IDs ────────────────────────────────────────────
+
+const { LEARNED_CONFLICTS: existing } = await import(LEARNED_PATH);
+const promotedIds = new Set(existing.map((c) => c.id));
+
+const pending = ids.filter((id) => !promotedIds.has(id));
+
+if (pending.length === 0) {
+  console.log(`All ${ids.length} candidate(s) already promoted.`);
+  process.exit(0);
+}
+
+// ─── Display candidates ───────────────────────────────────────────────────
+
+console.log(`\nConflict Candidates — ${pending.length} to review\n${"─".repeat(52)}`);
+for (const id of pending) {
+  const n = counts[id];
+  const label = n >= 5 ? "[HIGH]" : "[LOW] ";
+  const m = meta[id];
+  console.log(`\n${label} ${id}  (${n} occurrence${n === 1 ? "" : "s"})`);
+  if (m?.tool)             console.log(`  Tool:     ${m.tool}`);
+  if (m?.responseSummary)  console.log(`  Response: ${m.responseSummary.slice(0, 120)}`);
+}
+console.log(`\n${"─".repeat(52)}`);
+console.log("Actions: [p]romote  [d]ismiss  [s]kip\n");
+
+// ─── Interactive prompts ──────────────────────────────────────────────────
+
+const rl = createInterface({ input: process.stdin, output: process.stdout });
+const ask = (q) => new Promise((res) => rl.question(q, res));
+
+const toPromote = [];
+let promoted = 0, dismissed = 0, skipped = 0;
+
+for (const id of pending) {
+  const n = counts[id];
+  const label = n >= 5 ? "[HIGH]" : "[LOW] ";
+  const answer = await ask(`${label} ${id} (${n}×) [p/d/s]: `);
+  const a = answer.trim().toLowerCase();
+  if (a === "p") {
+    toPromote.push({ id, occurrences: n, meta: meta[id] });
+    promoted++;
+  } else if (a === "d") {
+    dismissed++;
+  } else {
+    skipped++;
+  }
+}
+
+rl.close();
+
+if (toPromote.length === 0) {
+  console.log(`\nDone. Promoted: 0. Dismissed: ${dismissed}. Skipped: ${skipped}.`);
+  process.exit(0);
+}
+
+// ─── Serialize and write learned-conflicts.mjs ────────────────────────────
+
+/**
+ * Build new LEARNED_CONFLICTS entries from promoted candidates.
+ * Only string-based detect rules are safe to serialize — assert this explicitly.
+ * (Auto-captured candidates structurally only use response-contains / tool-is rules.)
+ */
+const STRING_DETECT_TYPES = new Set([
+  "response-contains", "response-contains-any", "input-contains",
+  "input-not-contains", "tool-is",
+]);
+
+function buildEntry(candidate) {
+  const { id, meta: m } = candidate;
+  const detectRule = { type: "response-contains", value: (m?.responseSummary ?? "").slice(0, 60) };
+
+  // Assert: only string-based rule types may be serialized (no RegExp)
+  if (!STRING_DETECT_TYPES.has(detectRule.type)) {
+    throw new Error(`Cannot serialize detect rule type "${detectRule.type}" for id "${id}"`);
+  }
+
+  return {
+    id,
+    source: `learned (promoted from candidates — ${new Date().toISOString().slice(0, 10)})`,
+    tool: m?.tool ?? "Bash",
+    severity: "degraded",
+    detect: [detectRule],
+    falsePositiveGuards: [],
+    description: `Auto-promoted pattern: ${m?.responseSummary?.slice(0, 120) ?? id}`,
+    fix: {
+      summary: `Review and edit this entry in ${LEARNED_PATH}`,
+      example: `# Edit learned-conflicts.mjs to refine the detect rule and fix guidance`,
+    },
+  };
+}
+
+const newEntries = toPromote.map(buildEntry);
+const allEntries = [...existing, ...newEntries];
+
+const newSource =
+  `#!/usr/bin/env node\n` +
+  `/**\n` +
+  ` * Learned Conflict Patterns\n` +
+  ` *\n` +
+  ` * Auto-promoted patterns from conflict-candidates.jsonl.\n` +
+  ` * Same schema as CONFLICTS[] in conflict-knowledge.mjs.\n` +
+  ` *\n` +
+  ` * DO NOT hand-edit entries below the marker — use /conflict-audit --candidates to promote.\n` +
+  ` * Hand-editing the description/fix fields is fine.\n` +
+  ` *\n` +
+  ` * Generated by: conflict-detector.mjs (promotion flow, Phase 2)\n` +
+  ` */\n\n` +
+  `// ─── LEARNED PATTERNS (promoted from candidates) ─────────────────────────────\n` +
+  `export const LEARNED_CONFLICTS = ${JSON.stringify(allEntries, null, 2)};\n`;
+
+// Backup before write
+const backupPath = `${LEARNED_PATH}.bak-${Date.now()}`;
+try {
+  copyFileSync(LEARNED_PATH, backupPath);
+} catch {
+  console.error(`❌ Could not back up ${LEARNED_PATH}. Aborting.`);
+  process.exit(1);
+}
+
+// Write new file
+try {
+  writeFileSync(LEARNED_PATH, newSource, "utf-8");
+} catch (err) {
+  // Restore backup on write failure
+  try { copyFileSync(backupPath, LEARNED_PATH); } catch {}
+  console.error(`❌ Write failed: ${err.message}. Rolled back.`);
+  process.exit(1);
+}
+
+// Validate syntax
+const check = spawnSync("node", ["--check", LEARNED_PATH], { encoding: "utf-8" });
+if (check.status !== 0) {
+  try { copyFileSync(backupPath, LEARNED_PATH); } catch {}
+  console.error(`❌ Syntax check failed — rolled back.\n${check.stderr}`);
+  process.exit(1);
+}
+
+console.log(`\n✅ Wrote ${newEntries.length} new pattern(s) to ${LEARNED_PATH}`);
+
+// Regenerate docs
+const gen = spawnSync("node", [GENERATOR], { encoding: "utf-8" });
+if (gen.status !== 0) {
+  console.warn(`⚠️  Doc regeneration failed. Run manually:\n  node ${GENERATOR}`);
+} else {
+  console.log("✅ Regenerated conflict-checks.md");
+}
+
+console.log(`\nDone. Promoted: ${promoted}. Dismissed: ${dismissed}. Skipped: ${skipped}.`);
