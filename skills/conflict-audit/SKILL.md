@@ -168,9 +168,13 @@ try {
   const meta = {};
   for (const line of lines) {
     let e; try { e = JSON.parse(line); } catch { continue; }
-    if (e.type !== 'candidate' || !e.responseSummary?.trim()) continue;
-    counts[e.id] = (counts[e.id] ?? 0) + 1;
-    if (!meta[e.id]) meta[e.id] = e;
+    if (!e.id) continue;
+    if (e.type === 'candidate' && e.responseSummary?.trim()) {
+      if (!meta[e.id]) meta[e.id] = e;
+    }
+    if (e.type === 'candidate' || e.type === 'delta') {
+      counts[e.id] = (counts[e.id] ?? 0) + 1;
+    }
   }
   const ids = Object.keys(counts);
   const week = ids.filter(id => meta[id]?.firstSeen && new Date(meta[id].firstSeen) > new Date(Date.now() - 7*86400000));
