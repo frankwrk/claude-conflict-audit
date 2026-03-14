@@ -22,6 +22,18 @@ Scans the full Claude Code plugin/skill/hook/MCP setup for known conflicts and r
 
 ## Steps
 
+### --candidates mode (promotion UI)
+
+When user invokes `/conflict-audit --candidates`:
+
+```bash
+node ~/.claude/hooks/promote-candidates.mjs
+```
+
+Run this via Bash and stream the output. The script is interactive — it will prompt for keystrokes and answers. Do NOT summarize or intercept mid-run; let it complete. After it exits, note how many were promoted/dismissed from the final output line.
+
+---
+
 ### Step 0: Pre-install analysis (when user mentions installing a plugin)
 
 If the user says "install X", "add X", "npx skills add X", "safe to install X",
@@ -161,7 +173,7 @@ try {
 ```
 
 Show high-confidence candidates (5+ occurrences) with a note:
-"To promote a candidate to a learned pattern: edit `~/.claude/hooks/learned-conflicts.mjs` and add an entry to LEARNED_CONFLICTS. Then run `node ~/.claude/hooks/generate-conflict-checks.mjs` to regenerate docs."
+"To promote candidates interactively: run `/conflict-audit --candidates`"
 
 ### Step 5: Offer fixes
 

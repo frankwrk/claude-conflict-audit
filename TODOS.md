@@ -17,6 +17,22 @@ write new entry to LEARNED_CONFLICTS array. Then run
 
 ---
 
+## TODO: Session-end metrics rollup in session-capture.sh
+Priority: P2
+Effort: S
+Depends on: Stop hook (already fires on every session end)
+
+Append a one-liner to `~/.claude/conflict-metrics.jsonl` at session end:
+
+```sh
+echo "{\"date\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"alerts\":$(grep -c '"id"' ~/.claude/conflict-log.jsonl 2>/dev/null || echo 0)}" >> ~/.claude/conflict-metrics.jsonl
+```
+
+Goal: accumulate alerts/day over weeks to detect trend direction —
+declining rate = patterns learned and avoided; flat rate = endemic to setup.
+
+---
+
 ## TODO: Community conflict pattern export
 Priority: P3
 Effort: S (export script) + M (community repo)
