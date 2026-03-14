@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.1] - 2026-03-14
+
+### Changed
+- Updated SKILL.md with `--candidates` mode documentation for interactive promotion UI
+- Integrated `promote-candidates.mjs` into standard `/conflict-audit` workflow
+
+---
+
 ## [1.1.0] - 2026-03-14
 
 ### Added
