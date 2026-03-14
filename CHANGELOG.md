@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.1] - 2026-03-14
+
+### Changed
+- Updated SKILL.md with candidate-promotion documentation (manual, TTY-required via `promote-candidates.mjs`; non-interactive `--export` flag also documented)
+- Bumped SKILL.md frontmatter version to 1.1.1 for marketplace compatibility
+
+---
+
 ## [1.1.0] - 2026-03-14
 
 ### Added

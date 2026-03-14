@@ -1,6 +1,6 @@
 ---
 name: conflict-audit
-version: 1.1.0
+version: 1.1.1
 description: Audits installed Claude Code plugins, skills, hooks, and MCP servers for conflicts, broken symlinks, and tool-blocking rules. Use when the user says "check for conflicts", "why is X failing", "audit my plugins", "something is blocked", "install a new plugin", "tool not working", or after installing any new plugin, skill, or MCP server.
 author: frank
 tags: [hooks, plugins, debugging, mcp, automation]
@@ -24,6 +24,26 @@ Scans the full Claude Code plugin/skill/hook/MCP setup for known conflicts and r
 4. **Fixes** — offers to apply fixes for every blocking finding
 
 ## Steps
+
+### Candidate promotion (interactive)
+
+When user asks to review or promote conflict candidates:
+
+```bash
+node ~/.claude/hooks/promote-candidates.mjs
+```
+
+Run this via Bash. The script requires an interactive TTY — it will prompt per-candidate with `[p]romote / [d]ismiss / [s]kip`. Do NOT summarize or intercept mid-run; let it complete. After it exits, note how many were promoted/dismissed from the final output line.
+
+For non-interactive contexts (CI, automation), use the `--export` flag instead:
+
+```bash
+node ~/.claude/hooks/promote-candidates.mjs --export
+```
+
+This outputs a sanitized `conflicts.json` to stdout with no prompts.
+
+---
 
 ### Step 0: Pre-install analysis (when user mentions installing a plugin)
 
@@ -91,6 +111,9 @@ See `references/conflict-checks.md` for the full check list. Run each check in o
 node -e "
 const home = require('os').homedir();
 import(home + '/.claude/hooks/hook-registry-builder.mjs').then(async m => {
+import('node:os').then(os =>
+  import(os.homedir() + '/.claude/hooks/hook-registry-builder.mjs')
+).then(async m => {
   const registry = await m.buildHookRegistry();
   const conflicts = m.detectOrderingConflicts(registry);
   console.log(m.formatRegistryDiagram(registry, conflicts));
@@ -164,7 +187,7 @@ try {
 ```
 
 Show high-confidence candidates (5+ occurrences) with a note:
-"To promote a candidate to a learned pattern: edit `~/.claude/hooks/learned-conflicts.mjs` and add an entry to LEARNED_CONFLICTS. Then run `node ~/.claude/hooks/generate-conflict-checks.mjs` to regenerate docs."
+"To promote candidates interactively: run `node ~/.claude/hooks/promote-candidates.mjs` (TTY required). For non-interactive export: `node ~/.claude/hooks/promote-candidates.mjs --export`"
 
 ### Step 5: Offer fixes
 

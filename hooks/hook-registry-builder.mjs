@@ -70,13 +70,14 @@ export async function buildHookRegistry() {
           for (const file of hookFiles) {
             const event = fileToEvent(file);
             if (!event) continue;
+            const hookPath = resolve(hooksPath, file);
             registry.push({
               source: `${owner}/${plugin}`,
               event,
               matcher: null,
-              command: resolve(hooksPath, file),
+              command: hookPath,
               async: false,
-              writesStdout: true,
+              writesStdout: inferWritesStdout(hookPath),
             });
           }
         } catch { /* no hooks dir */ }
@@ -85,6 +86,23 @@ export async function buildHookRegistry() {
   } catch { /* no plugins cache */ }
 
   return registry;
+}
+
+/**
+ * Infer whether a hook file writes to stdout via static analysis.
+ * Conservative: returns true if unknown, unreadable, or unrecognized extension.
+ */
+export function inferWritesStdout(filePath) {
+  try {
+    const src = readFileSync(filePath, "utf-8");
+    if (/\.(mjs|js)$/i.test(filePath)) {
+      return /process\.stdout\.write|console\.(log|info|dir)\b/.test(src);
+    }
+    if (/\.sh$/i.test(filePath)) {
+      return /\becho\b|\bprintf\b/.test(src);
+    }
+  } catch { /* unreadable */ }
+  return true;
 }
 
 function fileToEvent(filename) {
