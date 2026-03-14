@@ -1,0 +1,15 @@
+{
+  "name": "claude-conflict-audit",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Conflict detection and auto-learning system for Claude Code plugins, skills, hooks, and MCP servers",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:watch": "node --test --watch test/*.test.mjs",
+    "generate": "node hooks/generate-conflict-checks.mjs"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
