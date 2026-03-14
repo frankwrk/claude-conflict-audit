@@ -109,7 +109,9 @@ See `references/conflict-checks.md` for the full check list. Run each check in o
 
 ```bash
 node -e "
-import('/Users/frank/.claude/hooks/hook-registry-builder.mjs').then(async m => {
+import('node:os').then(os =>
+  import(os.homedir() + '/.claude/hooks/hook-registry-builder.mjs')
+).then(async m => {
   const registry = await m.buildHookRegistry();
   const conflicts = m.detectOrderingConflicts(registry);
   console.log(m.formatRegistryDiagram(registry, conflicts));

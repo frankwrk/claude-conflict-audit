@@ -261,14 +261,15 @@ export function isFalsePositive(guards, data) {
 }
 
 /**
- * Find all matching conflicts for a given tool call.
- * Returns array of matching conflict entries.
+ * Find all matching conflicts in a given conflicts array for a tool call.
+ * Shared implementation used by detectConflicts() and conflict-detector.mjs
+ * (for learned conflicts).
  */
-export function detectConflicts({ toolName, toolInput, toolResponse }) {
+export function detectInConflicts(conflicts, { toolName, toolInput, toolResponse }) {
   const data = { toolName, toolInput, toolResponse };
   const matches = [];
 
-  for (const conflict of CONFLICTS) {
+  for (const conflict of conflicts) {
     // Tool must match (or be "MCP" and tool starts with mcp__)
     const toolMatches =
       conflict.tool === toolName ||
@@ -288,6 +289,13 @@ export function detectConflicts({ toolName, toolInput, toolResponse }) {
   }
 
   return matches;
+}
+
+/**
+ * Find all matching conflicts for a given tool call (searches built-in CONFLICTS).
+ */
+export function detectConflicts(data) {
+  return detectInConflicts(CONFLICTS, data);
 }
 
 /**

@@ -17,8 +17,9 @@ import { homedir, tmpdir } from "node:os";
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
 
 // ─── Load knowledge base ─────────────────────────────────────────────────
-const { detectConflicts, matchDetectRule, isFalsePositive, isErrorSignal } = await import(resolve(HOOK_DIR, "conflict-knowledge.mjs"));
+const { detectConflicts, detectInConflicts, isErrorSignal } = await import(resolve(HOOK_DIR, "conflict-knowledge.mjs"));
 const { LEARNED_CONFLICTS } = await import(resolve(HOOK_DIR, "learned-conflicts.mjs"));
+const { deriveCandidateId } = await import(resolve(HOOK_DIR, "candidate-id.mjs"));
 
 // ─── Session-scoped deduplication (file-based, cross-process) ────────────
 // Use ppid as session identifier (constant for process lifetime)
@@ -54,9 +55,7 @@ function logConflict(entry) {
 
 function captureCandidate({ toolName, toolInput, toolResponse, timestamp }) {
   try {
-    // Generate a stable ID from tool + first 60 chars of response
-    const raw = `${toolName}:${toolResponse.slice(0, 60)}`;
-    const candidateId = raw.replace(/[^a-z0-9]/gi, "-").toLowerCase().slice(0, 40);
+    const candidateId = deriveCandidateId(toolName, toolResponse);
 
     // Append-only design: always append, compute occurrences at read time.
     // O(1) on the hot path — only a tail-read for dedup check.
@@ -98,28 +97,6 @@ function captureCandidate({ toolName, toolInput, toolResponse, timestamp }) {
       appendFileSync(CANDIDATES_PATH, JSON.stringify(delta) + "\n", "utf-8");
     }
   } catch { /* never crash the hook */ }
-}
-
-/**
- * Detect conflicts using a caller-supplied array (for LEARNED_CONFLICTS).
- * Mirrors the logic in detectConflicts() but operates on a given array.
- */
-function detectInArray(conflictsArray, { toolName, toolInput, toolResponse }) {
-  const data = { toolName, toolInput, toolResponse };
-  const matches = [];
-  for (const conflict of conflictsArray) {
-    const toolMatches =
-      conflict.tool === toolName ||
-      (conflict.tool === "MCP" && toolName.startsWith("mcp__")) ||
-      conflict.tool === "*";
-    if (!toolMatches) continue;
-    const minMatch = conflict.minMatch ?? conflict.detect.length;
-    const matchCount = conflict.detect.filter((rule) => matchDetectRule(rule, data)).length;
-    if (matchCount < minMatch) continue;
-    if (isFalsePositive(conflict.falsePositiveGuards ?? [], data)) continue;
-    matches.push(conflict);
-  }
-  return matches;
 }
 
 // ─── Read stdin ──────────────────────────────────────────────────────────
@@ -184,7 +161,7 @@ try {
   // Detect conflicts — check both built-in and learned knowledge bases
   const conflicts = [
     ...detectConflicts({ toolName, toolInput, toolResponse: fullResponse }),
-    ...detectInArray(LEARNED_CONFLICTS, { toolName, toolInput, toolResponse: fullResponse }),
+    ...detectInConflicts(LEARNED_CONFLICTS, { toolName, toolInput, toolResponse: fullResponse }),
   ];
 
   if (conflicts.length === 0) {

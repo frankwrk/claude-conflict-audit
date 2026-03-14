@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
+const { deriveCandidateId } = await import(resolve(DIR, '../hooks/candidate-id.mjs'));
 const DETECTOR = resolve(DIR, '../hooks/conflict-detector.mjs');
 
 // Temp dir for all candidate writes — isolated from ~/.claude/hooks/
@@ -173,4 +174,39 @@ test('repeated MCP error → candidate entry captured', () => {
   const first = JSON.parse(lines[0]);
   assert.strictEqual(first.type, 'candidate');
   assert.strictEqual(first.tool, 'mcp__test-registry-unique');
+});
+
+// ─── deriveCandidateId (pure function, no subprocess needed) ──────────────
+
+test('deriveCandidateId: same error type, different paths → same ID', () => {
+  const a = deriveCandidateId('Bash', 'Exit code 127: /usr/bin/npx: command not found');
+  const b = deriveCandidateId('Bash', 'Exit code 127: /usr/local/bin/bar: command not found');
+  assert.strictEqual(a, b);
+});
+
+test('deriveCandidateId: same error type, different numbers → same ID', () => {
+  const a = deriveCandidateId('Bash', 'error: connection timeout after 30s');
+  const b = deriveCandidateId('Bash', 'error: connection timeout after 120s');
+  assert.strictEqual(a, b);
+});
+
+test('deriveCandidateId: different error types → different IDs', () => {
+  const a = deriveCandidateId('Bash', 'Exit code 127: command not found');
+  const b = deriveCandidateId('Bash', 'Permission denied: cannot write file');
+  assert.notStrictEqual(a, b);
+});
+
+test('deriveCandidateId: ID contains only [a-z0-9-] characters', () => {
+  const id = deriveCandidateId('mcp__some-tool', 'Error: rate limit exceeded for user alice@example.com');
+  assert.match(id, /^[a-z0-9-]+$/);
+});
+
+test('deriveCandidateId: empty response → non-empty ID, no crash', () => {
+  const id = deriveCandidateId('Bash', '');
+  assert.ok(typeof id === 'string' && id.length > 0);
+});
+
+test('deriveCandidateId: very long response → ID ≤ 60 chars', () => {
+  const id = deriveCandidateId('Bash', 'error: '.repeat(200) + 'something failed badly');
+  assert.ok(id.length <= 60, `ID too long: ${id.length} chars`);
 });

@@ -9,7 +9,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
-const { isErrorSignal, CONFLICTS, detectConflicts } = await import(resolve(DIR, '../hooks/conflict-knowledge.mjs'));
+const { isErrorSignal, CONFLICTS, detectConflicts, detectInConflicts } = await import(resolve(DIR, '../hooks/conflict-knowledge.mjs'));
 
 // ─── isErrorSignal ────────────────────────────────────────────────────────
 
@@ -133,4 +133,38 @@ test('detectConflicts returns empty for clean response', () => {
     toolResponse: 'hello',
   });
   assert.strictEqual(result.length, 0);
+});
+
+// ─── detectInConflicts ────────────────────────────────────────────────────
+
+const SYNTHETIC = [{
+  id: 'test-conflict',
+  tool: 'Bash',
+  severity: 'warning',
+  source: 'test',
+  description: 'test conflict',
+  detect: [{ type: 'response-contains', value: 'test-signal' }],
+  falsePositiveGuards: [],
+  fix: { summary: 'fix it', example: 'example' },
+}];
+
+test('detectInConflicts: empty array → no matches', () => {
+  const result = detectInConflicts([], { toolName: 'Bash', toolInput: {}, toolResponse: 'test-signal' });
+  assert.strictEqual(result.length, 0);
+});
+
+test('detectInConflicts: matches entry in synthetic array', () => {
+  const result = detectInConflicts(SYNTHETIC, { toolName: 'Bash', toolInput: {}, toolResponse: 'test-signal' });
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].id, 'test-conflict');
+});
+
+test('detectInConflicts: no match when tool differs', () => {
+  const result = detectInConflicts(SYNTHETIC, { toolName: 'Read', toolInput: {}, toolResponse: 'test-signal' });
+  assert.strictEqual(result.length, 0);
+});
+
+test('detectInConflicts(CONFLICTS, data) equals detectConflicts(data)', () => {
+  const data = { toolName: 'Bash', toolInput: { command: 'curl x' }, toolResponse: 'context-mode: curl/wget blocked' };
+  assert.deepStrictEqual(detectInConflicts(CONFLICTS, data), detectConflicts(data));
 });
