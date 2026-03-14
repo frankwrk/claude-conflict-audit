@@ -11,12 +11,38 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# Detect curl|bash: source files won't be present if stdin is a pipe with no repo
-if [ ! -f "$SCRIPT_DIR/hooks/conflict-detector.mjs" ]; then
-  echo "❌ Source files not found."
-  echo "   Run install.sh from the cloned repo directory:"
-  echo "   git clone https://github.com/anthropics/claude-conflict-audit && cd claude-conflict-audit && bash install.sh"
-  exit 1
+# Detect curl|bash: source files won't be present when the script is streamed.
+# If absent, download the repo into a temp dir and use that as SCRIPT_DIR.
+if [ ! -f "$SCRIPT_DIR/hooks/conflict-detector.mjs" ] || [ ! -f "$SCRIPT_DIR/skills/conflict-audit/SKILL.md" ]; then
+  REPO_URL="https://github.com/frankwrk/claude-conflict-audit"
+  TMP_REPO="$(mktemp -d)"
+  trap 'rm -rf "$TMP_REPO"' EXIT
+
+  echo "Source files not found locally — downloading from $REPO_URL..."
+
+  if command -v git &>/dev/null; then
+    if ! git clone --depth=1 "$REPO_URL" "$TMP_REPO/repo" 2>&1; then
+      echo "❌ git clone failed. Check your internet connection."
+      exit 1
+    fi
+    SCRIPT_DIR="$TMP_REPO/repo"
+  elif command -v curl &>/dev/null; then
+    if ! curl -fsSL "$REPO_URL/archive/refs/heads/main.tar.gz" -o "$TMP_REPO/repo.tar.gz"; then
+      echo "❌ Download failed. Check your internet connection."
+      exit 1
+    fi
+    tar -xzf "$TMP_REPO/repo.tar.gz" -C "$TMP_REPO"
+    SCRIPT_DIR="$(find "$TMP_REPO" -maxdepth 1 -type d -name 'claude-conflict-audit-*' | head -1)"
+    if [ -z "$SCRIPT_DIR" ]; then
+      echo "❌ Failed to extract downloaded archive."
+      exit 1
+    fi
+  else
+    echo "❌ Neither git nor curl found. Install one and retry."
+    exit 1
+  fi
+
+  echo "  ✅ Downloaded to $SCRIPT_DIR"
 fi
 CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
