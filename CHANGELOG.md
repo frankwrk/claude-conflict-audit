@@ -26,6 +26,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `TODOS.md`: replaced completed P2/P3 items with new deferred work (uninstall restore from backup, pre-commit auto-wiring, community patterns infrastructure)
 - Test suite: 55 → 75 tests (0 failures)
 
+### Fixed
+- `hooks/promote-candidates.mjs`: aggregation loop now only counts `candidate` rows with a non-empty `responseSummary` (delta rows and entries without a summary were inflating confidence scores)
+- `hooks/pre-commit.sh`: resolves symlink via `realpath` before deriving script dir; uses `CONFLICT_AUDIT_GENERATE_OUTPUT` to write to the repo's reference file rather than `~/.claude/`; `git add` fails hard if staging fails
+- `install.sh`: shell variable interpolation into `node -e` string replaced with `process.env.SETTINGS` / `process.env.HOOK_CMD` (prevents breakage on paths containing single quotes); detects `curl|bash` missing-source-files scenario and exits with a helpful error
+- `uninstall.sh`: `conflict-candidates.jsonl` now removed from hooks dir; guards against `settings.hooks` being undefined before accessing `PostToolUse`; cleans up empty `hooks` key after removal; same env-var fix as `install.sh`
+- `test/install.test.mjs`: `runInstaller` now sets `CLAUDE_HOME` in isolated env to prevent externally-exported override from bypassing test isolation
+- `test/promote-candidates.test.mjs`: missing-candidates test corrected to use `run([])` — TTY guard fires before file check, so exit 1 is expected behavior
+
 ---
 
 ## [1.0.0] - 2026-03-14

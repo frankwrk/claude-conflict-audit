@@ -14,12 +14,19 @@
 
 set -euo pipefail
 
+# Resolve the real location of this script (handles symlinks from .git/hooks/)
+SCRIPT_REAL="$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
+GEN_SCRIPT="$(dirname "$SCRIPT_REAL")/generate-conflict-checks.mjs"
+
+# Repo root (where conflict-checks.md lives in the working tree)
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_OUTPUT="$REPO_ROOT/skills/conflict-audit/references/conflict-checks.md"
+
 # Check if any knowledge/conflict files are staged
 if git diff --cached --name-only | grep -qE '(conflict-knowledge|learned-conflicts|conflict-checks)\.'; then
   echo "conflict-audit: knowledge base changed, regenerating conflict-checks.md..."
-  if node ~/.claude/hooks/generate-conflict-checks.mjs; then
-    # Stage the regenerated file if it changed
-    git add ~/.claude/skills/conflict-audit/references/conflict-checks.md 2>/dev/null || true
+  if CONFLICT_AUDIT_GENERATE_OUTPUT="$REPO_OUTPUT" node "$GEN_SCRIPT"; then
+    git add "$REPO_OUTPUT"
     echo "conflict-audit: conflict-checks.md updated ✅"
   else
     echo "conflict-audit: ❌ doc regeneration failed — fix before committing" >&2

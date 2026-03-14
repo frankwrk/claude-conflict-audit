@@ -26,7 +26,8 @@ for f in \
   "$HOOKS_DIR/hook-registry-builder.mjs" \
   "$HOOKS_DIR/generate-conflict-checks.mjs" \
   "$HOOKS_DIR/promote-candidates.mjs" \
-  "$HOOKS_DIR/pre-commit.sh"; do
+  "$HOOKS_DIR/pre-commit.sh" \
+  "$HOOKS_DIR/conflict-candidates.jsonl"; do
   if [ -f "$f" ]; then
     rm "$f"
     echo "  ✅ Removed $f"
@@ -50,10 +51,10 @@ echo "Removing PostToolUse hook from settings.json..."
 if [ ! -f "$SETTINGS" ]; then
   echo "  ℹ️  settings.json not found, nothing to remove."
 else
-  node -e "
+  SETTINGS="$SETTINGS" HOOK_CMD="$HOOK_CMD" node -e "
 const fs = require('fs');
-const settingsPath = '${SETTINGS}';
-const hookCmd = '${HOOK_CMD}';
+const settingsPath = process.env.SETTINGS;
+const hookCmd = process.env.HOOK_CMD;
 
 let settings;
 try {
@@ -63,16 +64,22 @@ try {
   process.exit(0);
 }
 
-const groups = settings?.hooks?.PostToolUse ?? [];
+if (!settings.hooks || !Array.isArray(settings.hooks.PostToolUse)) {
+  console.log('  ℹ️  Hook was not registered, nothing to remove.');
+  process.exit(0);
+}
+
+const groups = settings.hooks.PostToolUse;
 let removed = 0;
 for (const group of groups) {
   const before = (group.hooks ?? []).length;
   group.hooks = (group.hooks ?? []).filter(h => h.command !== hookCmd);
   removed += before - group.hooks.length;
 }
-// Remove empty groups
+// Remove empty groups and clean up empty keys
 settings.hooks.PostToolUse = groups.filter(g => (g.hooks ?? []).length > 0);
 if (settings.hooks.PostToolUse.length === 0) delete settings.hooks.PostToolUse;
+if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
 
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 if (removed > 0) {

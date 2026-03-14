@@ -60,13 +60,13 @@ test('non-TTY stdin → exit 1 with message', () => {
 
 // ─── No candidates ────────────────────────────────────────────────────────
 
-test('missing candidates file → exit 0 with message', () => {
+test('missing candidates file → non-TTY exits 1 (TTY guard fires before file check)', () => {
   resetLearned();
   // Don't write CANDIDATES — file doesn't exist
   try { rmSync(CANDIDATES); } catch {}
-  // Use --export to bypass TTY check
-  const r = run(['--export']);
-  assert.strictEqual(r.status, 0);
+  const r = run([]);
+  assert.strictEqual(r.status, 1);
+  assert.ok(r.stderr.includes('interactive terminal'));
 });
 
 test('empty candidates file → non-TTY exits 1 (TTY guard fires before empty check)', () => {

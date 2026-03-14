@@ -9,7 +9,15 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+# Detect curl|bash: source files won't be present if stdin is a pipe with no repo
+if [ ! -f "$SCRIPT_DIR/hooks/conflict-detector.mjs" ]; then
+  echo "❌ Source files not found."
+  echo "   Run install.sh from the cloned repo directory:"
+  echo "   git clone https://github.com/anthropics/claude-conflict-audit && cd claude-conflict-audit && bash install.sh"
+  exit 1
+fi
 CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 SKILLS_DIR="$CLAUDE_DIR/skills/conflict-audit"
@@ -86,11 +94,10 @@ fi
 echo ""
 echo "Registering PostToolUse hook..."
 
-node -e "
+SETTINGS="$SETTINGS" HOOK_CMD="$HOOK_CMD" node -e "
 const fs = require('fs');
-const path = require('path');
-const settingsPath = '${SETTINGS}';
-const hookCmd = '${HOOK_CMD}';
+const settingsPath = process.env.SETTINGS;
+const hookCmd = process.env.HOOK_CMD;
 
 let settings = {};
 if (fs.existsSync(settingsPath)) {

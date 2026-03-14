@@ -30,7 +30,7 @@ function runInstaller(fakeHome, extraEnv = {}) {
   return spawnSync('bash', [INSTALLER], {
     encoding: 'utf-8',
     timeout: 30000,
-    env: { ...process.env, HOME: fakeHome, ...extraEnv },
+    env: { ...process.env, HOME: fakeHome, CLAUDE_HOME: resolve(fakeHome, '.claude'), ...extraEnv },
     cwd: resolve(DIR, '..'),
   });
 }

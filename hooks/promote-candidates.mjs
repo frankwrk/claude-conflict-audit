@@ -99,8 +99,9 @@ for (const line of raw.split("\n")) {
   if (!line.trim()) continue;
   let entry;
   try { entry = JSON.parse(line); } catch { continue; /* skip corrupt lines */ }
+  if (entry.type !== "candidate" || !entry.responseSummary?.trim()) continue;
   counts[entry.id] = (counts[entry.id] ?? 0) + 1;
-  if (entry.type === "candidate" && !meta[entry.id]) meta[entry.id] = entry;
+  if (!meta[entry.id]) meta[entry.id] = entry;
 }
 
 const ids = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
