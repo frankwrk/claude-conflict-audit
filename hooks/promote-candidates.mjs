@@ -99,9 +99,13 @@ for (const line of raw.split("\n")) {
   if (!line.trim()) continue;
   let entry;
   try { entry = JSON.parse(line); } catch { continue; /* skip corrupt lines */ }
-  if (entry.type !== "candidate" || !entry.responseSummary?.trim()) continue;
-  counts[entry.id] = (counts[entry.id] ?? 0) + 1;
-  if (!meta[entry.id]) meta[entry.id] = entry;
+  if (!entry.id) continue;
+  if (entry.type === "candidate" && entry.responseSummary?.trim()) {
+    if (!meta[entry.id]) meta[entry.id] = entry;
+  }
+  if (entry.type === "candidate" || entry.type === "delta") {
+    counts[entry.id] = (counts[entry.id] ?? 0) + 1;
+  }
 }
 
 const ids = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);

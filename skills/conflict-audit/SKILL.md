@@ -6,7 +6,7 @@ author: frank
 tags: [hooks, plugins, debugging, mcp, automation]
 tools: [Read, Bash, Glob, Grep]
 requires_hook: PostToolUse
-install: bash install.sh
+install: curl -fsSL https://raw.githubusercontent.com/frankwrk/claude-conflict-audit/main/install.sh | bash
 allowed-tools: "Read Bash Glob Grep"
 metadata:
   category: utilities
@@ -109,9 +109,8 @@ See `references/conflict-checks.md` for the full check list. Run each check in o
 
 ```bash
 node -e "
-import('node:os').then(os =>
-  import(os.homedir() + '/.claude/hooks/hook-registry-builder.mjs')
-).then(async m => {
+const home = require('os').homedir();
+import(home + '/.claude/hooks/hook-registry-builder.mjs').then(async m => {
   const registry = await m.buildHookRegistry();
   const conflicts = m.detectOrderingConflicts(registry);
   console.log(m.formatRegistryDiagram(registry, conflicts));
@@ -161,18 +160,21 @@ node -e "
 const fs = require('fs');
 const path = require('os').homedir() + '/.claude/hooks/conflict-candidates.jsonl';
 try {
-  // Append-only format: group by id, count all lines (candidate + deltas) for occurrences
   const lines = fs.readFileSync(path, 'utf-8').trim().split('\n').filter(Boolean);
-  const parsed = lines.map(l => JSON.parse(l));
   const counts = {};
   const meta = {};
-  for (const e of parsed) {
-    counts[e.id] = (counts[e.id] ?? 0) + 1;
-    if (e.type === 'candidate') meta[e.id] = e;
-    if (e.timestamp) meta[e.id] = { ...meta[e.id], lastSeen: e.timestamp };
+  for (const line of lines) {
+    let e; try { e = JSON.parse(line); } catch { continue; }
+    if (!e.id) continue;
+    if (e.type === 'candidate' && e.responseSummary?.trim()) {
+      if (!meta[e.id]) meta[e.id] = e;
+    }
+    if (e.type === 'candidate' || e.type === 'delta') {
+      counts[e.id] = (counts[e.id] ?? 0) + 1;
+    }
   }
   const ids = Object.keys(counts);
-  const week = ids.filter(id => meta[id]?.lastSeen && new Date(meta[id].lastSeen) > new Date(Date.now() - 7*86400000));
+  const week = ids.filter(id => meta[id]?.firstSeen && new Date(meta[id].firstSeen) > new Date(Date.now() - 7*86400000));
   const rate = (week.length / 7).toFixed(1);
   console.log('Total candidates:', ids.length);
   console.log('7d avg/day:', rate, parseFloat(rate) > 10 ? '⚠️  HIGH' : '✅');
@@ -180,7 +182,7 @@ try {
   if (highConf.length > 0) {
     console.log('High-confidence candidates (5+ occurrences):');
     highConf.forEach(id => console.log(' ', id, 'x' + counts[id]));
-  }
+  } else { console.log('No high-confidence candidates yet.'); }
 } catch { console.log('No candidates yet.'); }
 "
 ```
