@@ -2,6 +2,69 @@
 
 ---
 
+## TODO: Cross-agent support (Cursor, Cline, Copilot, Gemini CLI, etc.)
+Priority: P2
+Effort: M
+Depends on: UX overhaul TODO (CLI entrypoint)
+
+The skill installs universally via `npx skills add` and shows up in Cursor, Cline,
+Copilot, Gemini CLI, Warp, and others — but the runtime detection layer is entirely
+Claude Code-specific. Users on other agents get a skill that partially works (static
+analysis, bash commands) but silently has no monitoring, no hook registry, and no
+runtime log.
+
+### Problem areas
+
+- **PostToolUse hook** — only exists in Claude Code. No other agent fires hook events
+  per tool call, so `conflict-detector.mjs` never runs passively on other agents.
+- **Hook registry** — `hook-registry-builder.mjs` reads `~/.claude/settings.json` and
+  `~/.claude/plugins/` — meaningless on Cursor/Cline/etc.
+- **install.sh** — only wires up `~/.claude/settings.json`. Does nothing useful for
+  other agents.
+- **Runtime log** — `conflict-log.jsonl` only gets written when Claude Code's hook fires.
+  On other agents it will always be empty.
+- **`requires_hook: PostToolUse`** frontmatter is set correctly but skills.sh currently
+  ignores it and installs universally anyway.
+
+### Proposed implementation
+
+#### 1. Agent detection in SKILL.md
+Add a Step 0 that detects which agent is running:
+```bash
+# Detect agent from environment
+if [ -f ~/.claude/settings.json ]; then AGENT="claude-code"
+elif [ -d ~/.cursor ]; then AGENT="cursor"
+else AGENT="unknown"; fi
+```
+Branch the audit report based on detected agent — show "Claude Code features unavailable"
+for non-Claude Code agents with guidance on what still works.
+
+#### 2. Agent-agnostic static analysis layer
+Extract the parts that work everywhere into a standalone mode:
+- Scan `~/.agents/skills/` for skills that reference `WebFetch`, `curl`, or `wget`
+- Check for duplicate skill names across agents
+- Verify SKILL.md frontmatter validity
+This gives non-Claude Code users genuine value without requiring hooks.
+
+#### 3. Adapter interface for other agents
+Define a minimal interface that other agents could implement:
+```js
+// hooks/agent-adapters/cursor.mjs — reads Cursor extension logs
+// hooks/agent-adapters/cline.mjs  — reads Cline conversation history
+```
+Each adapter provides `getRecentErrors()` and `getInstalledExtensions()`.
+The conflict detector uses the right adapter based on detected environment.
+
+#### 4. Update install.sh for multi-agent awareness
+Detect which agents are installed and offer to configure each:
+```
+Detected agents: Claude Code ✅, Cursor ✅, Cline (not found)
+Configuring Claude Code... done
+Cursor: passive monitoring not yet supported — static analysis only
+```
+
+---
+
 ## TODO: UX overhaul — install, manage, update, view results, uninstall
 Priority: P1
 Effort: L
